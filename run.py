@@ -18,13 +18,14 @@ from single_word.cnn_net import Net
 from single_word.utils import Tools
 from PIL import Image
 import numpy as np
+import csv
 tools = Tools('single_word/data/')
 
 def detect(save_img=False):
     source, weights, view_img, save_txt, imgsz = opt.source, opt.weights, opt.view_img, opt.save_txt, opt.img_size
-    save_txt = True
     # Directories
-    save_dir = Path(increment_path(Path(opt.project) / opt.name, exist_ok=opt.exist_ok))  # increment run
+    #save_dir = Path(increment_path(Path(opt.project) / opt.name, exist_ok=opt.exist_ok))  # increment run
+    save_dir = Path(Path(opt.project) / opt.name, exist_ok=opt.exist_ok)  # increment run
     (save_dir / 'labels' if save_txt else save_dir).mkdir(parents=True, exist_ok=True)  # make dir
 
     # Initialize
@@ -51,6 +52,10 @@ def detect(save_img=False):
     t0 = time.time()
     img = torch.zeros((1, 3, imgsz, imgsz), device=device)  # init img
     _ = model(img.half() if half else img) if device.type != 'cpu' else None  # run once
+    header = ['word_path', 'content', 'font', 'author', 'work_id', 'position']
+    with open('data.csv', 'a', encoding = 'UTF8') as csvf:
+        writer = csv.writer(csvf)
+        writer.writerow(header)
     for path, img, im0s, vid_cap in dataset:
         img = torch.from_numpy(img).to(device)
         img = img.half() if half else img.float()  # uint8 to fp16/32
@@ -71,19 +76,22 @@ def detect(save_img=False):
         # Process detections
         for i, det in enumerate(pred):  # detections per image
             p, s, im0, frame = path, '', im0s, getattr(dataset, 'frame', 0)
+            ppath = p[p.rfind('single_word/imgs/') + len('single_word/imgs/'):]
             p = Path(p)  # to Path
             save_path = str(save_dir / p.name)  # img.jpg
             txt_path = str(save_dir / 'labels' / p.stem) + ('' if dataset.mode == 'image' else f'_{frame}')  # img.txt
             s += '%gx%g ' % img.shape[2:]  # print string
-            gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  # normalization gain whwh
+            gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  # normalization gain whwh\
             if len(det):
                 # Rescale boxes from img_size to im0 size
                 det[:, :4] = scale_coords(img.shape[2:], det[:, :4], im0.shape).round()
 
                 # Write results
+                word_count = 0
                 for *xyxy, conf, cls in reversed(det):
                     c1, c2 = (int(xyxy[0]), int(xyxy[1])), (int(xyxy[2]), int(xyxy[3]))
                     word = im0[c1[1]:c2[1], c1[0]:c2[0]] # y x
+                    original_word = word.copy()
                     index, score, result = tools.evaluate_word(word, modelc)
                     result = np.array(result)
                     result = cv2.resize(result, (abs(c1[0] - c2[0]), abs(c1[1] - c2[1]))) # w h
@@ -97,14 +105,38 @@ def detect(save_img=False):
                     if save_img or view_img:  # Add bbox to image
                         # label = f'{names[int(cls)]} {conf:.2f}'
                         label = f'{conf:.2f} {score*100:.2f}'
-                        plot_one_box(xyxy, im0, label=label, color=colors[int(cls)], line_thickness=1)
+                        #plot_one_box(xyxy, im0, label=label, color=colors[int(cls)], line_thickness=1)
+                        dot = ppath.rfind(".")
+                        save_word_path = str(save_dir / ppath[:dot] / (str(word_count) + ppath[dot:]))
+                        #print(save_word_path, word.shape)
+                        original_word = cv2.inRange(original_word, np.array([110, 110, 110], dtype = "uint16"), np.array([255, 255, 255], dtype = "uint16"))
+                        x_boader, y_boarder = int(0.1*original_word.shape[1]), int(0.1*original_word.shape[0])
+                        output_word = cv2.copyMakeBorder(original_word, y_boarder, y_boarder, x_boader, x_boader, cv2.BORDER_CONSTANT, None, [255, 255, 255])
+                        output_word = cv2.resize(output_word, (100, 100), interpolation=cv2.INTER_AREA)
+                        save_subdir = Path(save_word_path).parents[0]  # increment run
+                        save_subdir.mkdir(parents=True, exist_ok=True)  # make dir
+                        cv2.imwrite(save_word_path, output_word)
+                        ### write to csv
+                        word_path_relative = ppath[:dot] + "/" + str(word_count) + ppath[dot:]
+                        content = None
+                        font = Path(word_path_relative).parts[-4]
+                        author = Path(word_path_relative).parts[-3]
+                        workname = Path(word_path_relative).parts[-2]
+                        xyxy_ = [int(xy) for xy in xyxy]
+                        data = [word_path_relative, content, font, author, workname, xyxy_]
+                        with open('data.csv', 'a', encoding = 'UTF8') as csvf:
+                            writer = csv.writer(csvf)
+                            writer.writerow(data)
+                        print(data)
+                    word_count = word_count + 1
+
 
             # Print time (inference + NMS)
             print(f'{s}Done. ({t2 - t1:.3f}s)')
 
             # Save results (image with detections)
-            if save_img:
-                cv2.imwrite(save_path, im0)
+            # if save_img:
+            #     cv2.imwrite(save_path, im0)
     if save_txt or save_img:
         s = f"\n{len(list(save_dir.glob('labels/*.txt')))} labels saved to {save_dir / 'labels'}" if save_txt else ''
         print(f"Results saved to {save_dir}{s}")

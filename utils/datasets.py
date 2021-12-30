@@ -122,17 +122,21 @@ class LoadImages:  # for inference
     def __init__(self, path, img_size=640):
         p = str(Path(path))  # os-agnostic
         p = os.path.abspath(p)  # absolute path
-        if '*' in p:
-            files = sorted(glob.glob(p, recursive=True))  # glob
-        elif os.path.isdir(p):
-            files = sorted(glob.glob(os.path.join(p, '*.*')))  # dir
-        elif os.path.isfile(p):
-            files = [p]  # files
-        else:
-            raise Exception(f'ERROR: {p} does not exist')
+        # if '*' in p:
+        #     files = sorted(glob.glob(p, recursive=True))  # glob
+        # elif os.path.isdir(p):
+        #     files = sorted(glob.glob(os.path.join(p, '*.*')))  # dir
+        # elif os.path.isfile(p):
+        #     files = [p]  # files
+        # else:
+        #     raise Exception(f'ERROR: {p} does not exist')
+        filelist = []
+        for home, dirs, files in os.walk(p):
+            for filename in files:
+                filelist.append(os.path.join(home, filename))
 
-        images = [x for x in files if x.split('.')[-1].lower() in img_formats]
-        videos = [x for x in files if x.split('.')[-1].lower() in vid_formats]
+        images = [x for x in filelist if x.split('.')[-1].lower() in img_formats]
+        videos = [x for x in filelist if x.split('.')[-1].lower() in vid_formats]
         ni, nv = len(images), len(videos)
 
         self.img_size = img_size
